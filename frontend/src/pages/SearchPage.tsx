@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { SearchBar } from '@/components/search/SearchBar';
 import { SearchResults } from '@/components/search/SearchResults';
@@ -6,13 +6,39 @@ import { searchWeb } from '@/services/searchApi';
 import { saveSearchToHistory } from '@/services/historyApi';
 import type { SearchFilters } from '@/types/search';
 
+const getPersistedState = (key: string, defaultValue: string = '') => {
+    try {
+        const value = sessionStorage.getItem(key);
+        return value ? JSON.parse(value) : defaultValue;
+    } catch {
+        return defaultValue;
+    }
+};
+
+const setPersistedState = (key: string, value: string) => {
+    try {
+        sessionStorage.setItem(key, JSON.stringify(value));
+    } catch {
+        // Ignore storage errors
+    }
+};
+
 export const SearchPage = () => {
-    const [searchQuery, setSearchQuery] = useState('');
-    const [activeQuery, setActiveQuery] = useState('');
+    const [searchQuery, setSearchQuery] = useState(() => getPersistedState('searchQuery'));
+    const [activeQuery, setActiveQuery] = useState(() => getPersistedState('activeQuery'));
     const [filters] = useState<SearchFilters>({
         contentType: 'all',
         sortBy: 'relevance'
     });
+
+    // Persist state changes
+    useEffect(() => {
+        setPersistedState('searchQuery', searchQuery);
+    }, [searchQuery]);
+
+    useEffect(() => {
+        setPersistedState('activeQuery', activeQuery);
+    }, [activeQuery]);
 
     const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error } = useInfiniteQuery({
         queryKey: ['search', activeQuery, filters],
