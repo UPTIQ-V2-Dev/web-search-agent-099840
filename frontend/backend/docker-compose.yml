@@ -1,0 +1,138 @@
+version: '3.8'
+
+services:
+    # PostgreSQL Database
+    postgres:
+        image: postgres:15-alpine
+        container_name: websearch-postgres
+        environment:
+            POSTGRES_DB: websearch_db
+            POSTGRES_USER: websearch_user
+            POSTGRES_PASSWORD: websearch_password
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+            - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+        ports:
+            - '5432:5432'
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U websearch_user -d websearch_db']
+            interval: 30s
+            timeout: 10s
+            retries: 3
+        networks:
+            - websearch-network
+
+    # Redis for caching and session management
+    redis:
+        image: redis:7-alpine
+        container_name: websearch-redis
+        ports:
+            - '6379:6379'
+        volumes:
+            - redis_data:/data
+        command: redis-server --appendonly yes
+        healthcheck:
+            test: ['CMD', 'redis-cli', 'ping']
+            interval: 30s
+            timeout: 10s
+            retries: 3
+        networks:
+            - websearch-network
+
+    # Backend API (Development)
+    api-dev:
+        build:
+            context: .
+            target: development
+        container_name: websearch-api-dev
+        environment:
+            NODE_ENV: development
+            DATABASE_URL: postgresql://websearch_user:websearch_password@postgres:5432/websearch_db?schema=public
+            REDIS_URL: redis://redis:6379
+            JWT_ACCESS_SECRET: dev_access_secret_change_in_production
+            JWT_REFRESH_SECRET: dev_refresh_secret_change_in_production
+            CORS_ORIGIN: http://localhost:3000
+        ports:
+            - '3001:3001'
+        volumes:
+            - .:/app
+            - /app/node_modules
+            - /app/dist
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        networks:
+            - websearch-network
+        profiles:
+            - development
+
+    # Backend API (Production)
+    api:
+        build:
+            context: .
+            target: production
+        container_name: websearch-api
+        environment:
+            NODE_ENV: production
+            DATABASE_URL: postgresql://websearch_user:websearch_password@postgres:5432/websearch_db?schema=public
+            REDIS_URL: redis://redis:6379
+        env_file:
+            - .env
+        ports:
+            - '3001:3001'
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+        networks:
+            - websearch-network
+        profiles:
+            - production
+
+    # Database migration service
+    migrate:
+        build:
+            context: .
+            target: build
+        container_name: websearch-migrate
+        environment:
+            DATABASE_URL: postgresql://websearch_user:websearch_password@postgres:5432/websearch_db?schema=public
+        command: ['npx', 'prisma', 'migrate', 'deploy']
+        depends_on:
+            postgres:
+                condition: service_healthy
+        networks:
+            - websearch-network
+        profiles:
+            - migrate
+
+    # Database seeding service
+    seed:
+        build:
+            context: .
+            target: build
+        container_name: websearch-seed
+        environment:
+            DATABASE_URL: postgresql://websearch_user:websearch_password@postgres:5432/websearch_db?schema=public
+        command: ['npm', 'run', 'db:seed']
+        depends_on:
+            postgres:
+                condition: service_healthy
+        networks:
+            - websearch-network
+        profiles:
+            - seed
+
+volumes:
+    postgres_data:
+        driver: local
+    redis_data:
+        driver: local
+
+networks:
+    websearch-network:
+        driver: bridge
