@@ -24,7 +24,10 @@ export const searchWeb = async (searchQuery: SearchQuery): Promise<SearchRespons
                 title: result.title || '',
                 url: result.url || '',
                 snippet: result.snippet || '',
-                domain: result.domain || new URL(result.url || '').hostname || '',
+                domain:
+                    result.domain ||
+                    (result.url && result.url.startsWith('http') ? new URL(result.url).hostname : '') ||
+                    '',
                 publishedAt: result.publishedDate || new Date().toISOString(),
                 contentType: 'web' as const,
                 metadata: {}
