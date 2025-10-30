@@ -19,22 +19,22 @@ model User {
   email           String          @unique
   name            String?
   password        String
-  role            Role            @default(USER)
+  role            String          @default("USER")
   isEmailVerified Boolean         @default(false)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
-  Token           Token[]
+  tokens          Token[]
   SearchHistory   SearchHistory[]
 }
 
 model Token {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   token       String
-  type        TokenType
+  type        String
   expires     DateTime
   blacklisted Boolean
-  createdAt   DateTime  @default(now())
-  user        User      @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
   userId      Int
 }
 
@@ -56,16 +56,4 @@ model SearchCache {
   hitCount  Int      @default(1)
   expiresAt DateTime
   createdAt DateTime @default(now())
-}
-
-enum Role {
-  USER
-  ADMIN
-}
-
-enum TokenType {
-  ACCESS
-  REFRESH
-  RESET_PASSWORD
-  VERIFY_EMAIL
 }

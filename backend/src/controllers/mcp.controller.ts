@@ -7,33 +7,52 @@ import { Server } from '@modelcontextprotocol/sdk/server';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { Request, Response } from 'express';
+import httpStatus from 'http-status';
 import { v4 as uuid } from 'uuid';
 
 // Map to store transports by session ID
 const transports: { [sessionId: string]: StreamableHTTPServerTransport | undefined } = {};
+// Map to store server instances by session ID
+const servers: { [sessionId: string]: Server | undefined } = {};
 
 export const mcpPostController = catchAsync(async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
     let transport: StreamableHTTPServerTransport;
+    let server: Server;
 
-    if (sessionId && transports[sessionId]) {
-        transport = transports[sessionId]!;
-    } else if (!sessionId && isInitializeRequest(req.body)) {
+    // Validate JSON-RPC request format
+    if (!req.body || !req.body.method) {
+        return res.status(httpStatus.BAD_REQUEST).json({
+            jsonrpc: '2.0',
+            error: {
+                code: JSONRPC_INVALID_REQUEST,
+                message: 'Invalid JSON-RPC request'
+            },
+            id: req.body?.id || null
+        });
+    }
+
+    // Handle session initialization
+    if (!sessionId && isInitializeRequest(req.body)) {
+        const newSessionId = uuid();
+
         transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => uuid(),
-            onsessioninitialized: newSessionId => {
-                console.log('New MCP session initialized:', newSessionId);
-                transports[newSessionId] = transport;
+            sessionIdGenerator: () => newSessionId,
+            onsessioninitialized: (id: string) => {
+                console.log('New MCP session initialized:', id);
+                transports[id] = transport;
+                servers[id] = server;
             }
         });
 
         transport.onclose = () => {
             if (transport.sessionId) {
                 delete transports[transport.sessionId];
+                delete servers[transport.sessionId];
             }
         };
 
-        const server = new Server(
+        server = new Server(
             {
                 name: 'app-builder-mcp-server',
                 title: 'App Builder MCP Server',
@@ -49,48 +68,63 @@ export const mcpPostController = catchAsync(async (req: Request, res: Response) 
 
         registerMCPTools({ server, tools: [...userTools, ...searchTools] });
         await server.connect(transport);
+    } else if (sessionId && transports[sessionId]) {
+        // Use existing session
+        transport = transports[sessionId]!;
+        server = servers[sessionId]!;
     } else {
-        res.status(400).json({
-            jsonrpc: '2.0',
-            error: {
-                code: JSONRPC_INVALID_REQUEST,
-                message: 'Invalid Request: No valid session ID provided'
-            },
-            id: req.body?.id || null
-        });
-        return;
-    }
-
-    await transport.handleRequest(req, res, req.body);
-});
-
-export const mcpGetController = catchAsync(async (req: Request, res: Response) => {
-    const sessionId = req.headers['mcp-session-id'] as string | undefined;
-
-    if (!sessionId || !transports[sessionId]) {
-        res.status(400).json({
+        return res.status(httpStatus.BAD_REQUEST).json({
             jsonrpc: '2.0',
             error: {
                 code: JSONRPC_INVALID_REQUEST,
                 message: 'Invalid Request: Invalid or missing session ID'
             },
-            id: null
+            id: req.body?.id || null
         });
-        return;
     }
 
     try {
-        const transport = transports[sessionId];
-        await transport.handleRequest(req, res);
+        await transport.handleRequest(req, res, req.body);
     } catch (error) {
-        res.status(500).json({
+        res.status(httpStatus.INTERNAL_SERVER_ERROR).json({
             jsonrpc: '2.0',
             error: {
                 code: JSONRPC_INTERNAL_ERROR,
-                message: 'Internal error',
-                data: { details: (error as Error).message }
+                message: 'Internal server error'
             },
-            id: null
+            id: req.body?.id || null
+        });
+    }
+});
+
+export const mcpGetController = catchAsync((req: Request, res: Response) => {
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+    if (!sessionId) {
+        return res.status(httpStatus.BAD_REQUEST).json({
+            error: 'Missing session ID'
+        });
+    }
+
+    if (!transports[sessionId]) {
+        return res.status(httpStatus.NOT_FOUND).json({
+            error: 'Session not found'
+        });
+    }
+
+    try {
+        // Get capabilities from available tools
+        const allTools = [...userTools, ...searchTools];
+        const capabilities = allTools.map(tool => tool.id);
+
+        res.status(httpStatus.OK).json({
+            sessionId,
+            status: 'active',
+            capabilities
+        });
+    } catch (error) {
+        res.status(httpStatus.INTERNAL_SERVER_ERROR).json({
+            error: 'Internal server error'
         });
     }
 });
@@ -98,37 +132,36 @@ export const mcpGetController = catchAsync(async (req: Request, res: Response) =
 export const mcpDeleteController = catchAsync(async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
-    if (!sessionId || !transports[sessionId]) {
-        res.status(400).json({
-            jsonrpc: '2.0',
-            error: {
-                code: JSONRPC_INVALID_REQUEST,
-                message: 'Invalid Request: Invalid or missing session ID'
-            },
-            id: null
+    if (!sessionId) {
+        return res.status(httpStatus.BAD_REQUEST).json({
+            error: 'Missing session ID'
         });
-        return;
+    }
+
+    if (!transports[sessionId]) {
+        return res.status(httpStatus.NOT_FOUND).json({
+            error: 'Session not found'
+        });
     }
 
     try {
         const transport = transports[sessionId];
 
-        // Handle the delete request through transport first
-        await transport.handleRequest(req, res);
-
-        // Clean up the session after successful deletion
+        // Clean up the session
         if (transport.sessionId) {
             delete transports[transport.sessionId];
+            delete servers[transport.sessionId];
         }
+
+        // Close transport if it has a close method
+        if (typeof transport.close === 'function') {
+            await transport.close();
+        }
+
+        res.status(httpStatus.NO_CONTENT).send();
     } catch (error) {
-        res.status(500).json({
-            jsonrpc: '2.0',
-            error: {
-                code: JSONRPC_INTERNAL_ERROR,
-                message: 'Internal error',
-                data: { details: (error as Error).message }
-            },
-            id: null
+        res.status(httpStatus.INTERNAL_SERVER_ERROR).json({
+            error: 'Internal server error'
         });
     }
 });

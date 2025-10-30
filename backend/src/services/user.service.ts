@@ -1,5 +1,5 @@
 import prisma from '../client.ts';
-import { Prisma, Role, User } from '../generated/prisma/index.js';
+import { Prisma, User } from '../generated/prisma/index.js';
 import ApiError from '../utils/ApiError.ts';
 import { encryptPassword } from '../utils/encryption.ts';
 import httpStatus from 'http-status';
@@ -7,13 +7,18 @@ import httpStatus from 'http-status';
 /**
  * Create a user
  * @param {Object} userBody
- * @returns {Promise<User>}
+ * @returns {Promise<Omit<User, 'password'>>}
  */
-const createUser = async (email: string, password: string, name?: string, role: Role = Role.USER): Promise<User> => {
-    if (await getUserByEmail(email)) {
-        throw new ApiError(httpStatus.BAD_REQUEST, 'Email already taken');
+const createUser = async (
+    email: string,
+    password: string,
+    name: string,
+    role: string = 'USER'
+): Promise<Omit<User, 'password'>> => {
+    if (await getUserByEmail(email, true)) {
+        throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid input or email already exists');
     }
-    return prisma.user.create({
+    const user = await prisma.user.create({
         data: {
             email,
             name,
@@ -21,6 +26,10 @@ const createUser = async (email: string, password: string, name?: string, role: 
             role
         }
     });
+
+    // Remove password from response
+    const { password: _, ...userWithoutPassword } = user;
+    return userWithoutPassword;
 };
 
 /**
@@ -32,100 +41,186 @@ const createUser = async (email: string, password: string, name?: string, role: 
  * @param {number} [options.page] - Current page (default = 1)
  * @returns {Promise<QueryResult>}
  */
-const queryUsers = async <Key extends keyof User>(
-    filter: object,
+const queryUsers = async (
+    filter: any,
     options: {
         limit?: number;
         page?: number;
         sortBy?: string;
-        sortType?: 'asc' | 'desc';
-    },
-    keys: Key[] = ['id', 'email', 'name', 'password', 'role', 'isEmailVerified', 'createdAt', 'updatedAt'] as Key[]
-): Promise<Pick<User, Key>[]> => {
+    }
+): Promise<{
+    results: Omit<User, 'password'>[];
+    page: number;
+    limit: number;
+    totalPages: number;
+    totalResults: number;
+}> => {
     const page = options.page ?? 1;
     const limit = options.limit ?? 10;
     const sortBy = options.sortBy;
-    const sortType = options.sortType ?? 'desc';
+
+    // Build where clause for filtering
+    const where: any = {};
+    if (filter.name) {
+        where.name = { contains: filter.name, mode: 'insensitive' };
+    }
+    if (filter.role) {
+        where.role = filter.role;
+    }
+
+    // Parse sortBy if provided (format: field:direction)
+    let orderBy: any = undefined;
+    if (sortBy) {
+        const [field, direction] = sortBy.split(':');
+        orderBy = { [field]: direction || 'asc' };
+    }
+
+    // Get total count for pagination
+    const totalResults = await prisma.user.count({ where });
+    const totalPages = Math.ceil(totalResults / limit);
+
+    // Get users without password
     const users = await prisma.user.findMany({
-        where: filter,
-        select: keys.reduce((obj, k) => ({ ...obj, [k]: true }), {}),
-        skip: page * limit,
+        where,
+        select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            isEmailVerified: true,
+            createdAt: true,
+            updatedAt: true
+        },
+        skip: (page - 1) * limit,
         take: limit,
-        orderBy: sortBy ? { [sortBy]: sortType } : undefined
+        orderBy
     });
-    return users as Pick<User, Key>[];
+
+    return {
+        results: users,
+        page,
+        limit,
+        totalPages,
+        totalResults
+    };
 };
 
 /**
  * Get user by id
- * @param {ObjectId} id
- * @param {Array<Key>} keys
- * @returns {Promise<Pick<User, Key> | null>}
+ * @param {number} id
+ * @param {boolean} includePassword - Whether to include password field (for internal use only)
+ * @returns {Promise<Omit<User, 'password'> | User | null>}
  */
-const getUserById = async <Key extends keyof User>(
+const getUserById = async (
     id: number,
-    keys: Key[] = ['id', 'email', 'name', 'password', 'role', 'isEmailVerified', 'createdAt', 'updatedAt'] as Key[]
-): Promise<Pick<User, Key> | null> => {
-    return (await prisma.user.findUnique({
-        where: { id },
-        select: keys.reduce((obj, k) => ({ ...obj, [k]: true }), {})
-    })) as Promise<Pick<User, Key> | null>;
+    includePassword: boolean = false
+): Promise<Omit<User, 'password'> | User | null> => {
+    if (includePassword) {
+        // For internal use (authentication, etc.)
+        return await prisma.user.findUnique({
+            where: { id }
+        });
+    } else {
+        // For API responses - exclude password
+        return await prisma.user.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                isEmailVerified: true,
+                createdAt: true,
+                updatedAt: true
+            }
+        });
+    }
 };
 
 /**
  * Get user by email
  * @param {string} email
- * @param {Array<Key>} keys
- * @returns {Promise<Pick<User, Key> | null>}
+ * @param {boolean} includePassword - Whether to include password field (for internal use only)
+ * @returns {Promise<Omit<User, 'password'> | User | null>}
  */
-const getUserByEmail = async <Key extends keyof User>(
+const getUserByEmail = async (
     email: string,
-    keys: Key[] = ['id', 'email', 'name', 'password', 'role', 'isEmailVerified', 'createdAt', 'updatedAt'] as Key[]
-): Promise<Pick<User, Key> | null> => {
-    return await (prisma.user.findUnique({
-        where: { email },
-        select: keys.reduce((obj, k) => ({ ...obj, [k]: true }), {})
-    }) as Promise<Pick<User, Key> | null>);
+    includePassword: boolean = false
+): Promise<Omit<User, 'password'> | User | null> => {
+    if (includePassword) {
+        // For internal use (authentication, etc.)
+        return await prisma.user.findUnique({
+            where: { email }
+        });
+    } else {
+        // For API responses - exclude password
+        return await prisma.user.findUnique({
+            where: { email },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                isEmailVerified: true,
+                createdAt: true,
+                updatedAt: true
+            }
+        });
+    }
 };
 
 /**
  * Update user by id
- * @param {ObjectId} userId
+ * @param {number} userId
  * @param {Object} updateBody
- * @returns {Promise<User>}
+ * @returns {Promise<Omit<User, 'password'>>}
  */
-const updateUserById = async <Key extends keyof User>(
-    userId: number,
-    updateBody: Prisma.UserUpdateInput,
-    keys: Key[] = ['id', 'email', 'name', 'role'] as Key[]
-): Promise<Pick<User, Key> | null> => {
-    const user = await getUserById(userId, ['id', 'email', 'name']);
+const updateUserById = async (userId: number, updateBody: Prisma.UserUpdateInput): Promise<Omit<User, 'password'>> => {
+    const user = await getUserById(userId, true);
     if (!user) {
         throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
     }
-    if (updateBody.email && (await getUserByEmail(updateBody.email as string))) {
-        throw new ApiError(httpStatus.BAD_REQUEST, 'Email already taken');
+
+    // Check if email already exists (if email is being updated)
+    if (updateBody.email && updateBody.email !== user.email) {
+        const existingUser = await getUserByEmail(updateBody.email as string, true);
+        if (existingUser) {
+            throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid input or email already exists');
+        }
     }
+
+    // Hash password if it's being updated
+    if (updateBody.password) {
+        updateBody.password = await encryptPassword(updateBody.password as string);
+    }
+
     const updatedUser = await prisma.user.update({
-        where: { id: user.id },
+        where: { id: userId },
         data: updateBody,
-        select: keys.reduce((obj, k) => ({ ...obj, [k]: true }), {})
+        select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            isEmailVerified: true,
+            createdAt: true,
+            updatedAt: true
+        }
     });
-    return updatedUser as Pick<User, Key> | null;
+    return updatedUser;
 };
 
 /**
  * Delete user by id
- * @param {ObjectId} userId
- * @returns {Promise<User>}
+ * @param {number} userId
+ * @returns {Promise<void>}
  */
-const deleteUserById = async (userId: number): Promise<User> => {
-    const user = await getUserById(userId);
+const deleteUserById = async (userId: number): Promise<void> => {
+    const user = await getUserById(userId, true);
     if (!user) {
         throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
     }
-    await prisma.user.delete({ where: { id: user.id } });
-    return user;
+    await prisma.user.delete({ where: { id: userId } });
 };
 
 export default {

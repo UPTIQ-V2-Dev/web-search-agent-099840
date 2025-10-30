@@ -218,8 +218,11 @@ const getUserSearchHistory = async (userId, options = {}) => {
     ]);
     return {
         items: items.map(item => ({
-            ...item,
-            filters: item.filters ? JSON.parse(item.filters) : null
+            id: item.id,
+            query: item.query,
+            filters: item.filters ? JSON.parse(item.filters) : null,
+            searchedAt: item.createdAt.toISOString(),
+            resultCount: item.resultCount
         })),
         totalCount,
         currentPage: page,

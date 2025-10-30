@@ -1,4 +1,3 @@
-import { Role } from '../generated/prisma/index.js';
 import { userService } from "../services/index.js";
 import pick from "../utils/pick.js";
 import { z } from 'zod';
@@ -6,7 +5,6 @@ const userSchema = z.object({
     id: z.number(),
     email: z.string(),
     name: z.string().nullable(),
-    password: z.string(),
     role: z.string(),
     isEmailVerified: z.boolean(),
     createdAt: z.string(),
@@ -20,7 +18,7 @@ const createUserTool = {
         email: z.string().email(),
         password: z.string().min(8),
         name: z.string(),
-        role: z.enum([Role.USER, Role.ADMIN])
+        role: z.enum(['USER', 'ADMIN'])
     }),
     outputSchema: userSchema,
     fn: async (inputs) => {
@@ -31,7 +29,7 @@ const createUserTool = {
 const getUsersTool = {
     id: 'user_get_all',
     name: 'Get All Users',
-    description: 'Get all users with optional filters and pagination',
+    description: 'Get all users with optional filters and pagination (admin only)',
     inputSchema: z.object({
         name: z.string().optional(),
         role: z.string().optional(),
@@ -40,13 +38,17 @@ const getUsersTool = {
         page: z.number().int().optional()
     }),
     outputSchema: z.object({
-        users: z.array(userSchema)
+        results: z.array(userSchema),
+        page: z.number(),
+        limit: z.number(),
+        totalPages: z.number(),
+        totalResults: z.number()
     }),
     fn: async (inputs) => {
         const filter = pick(inputs, ['name', 'role']);
         const options = pick(inputs, ['sortBy', 'limit', 'page']);
         const result = await userService.queryUsers(filter, options);
-        return { users: result };
+        return result;
     }
 };
 const getUserTool = {
@@ -58,7 +60,7 @@ const getUserTool = {
     }),
     outputSchema: userSchema,
     fn: async (inputs) => {
-        const user = await userService.getUserById(inputs.userId);
+        const user = await userService.getUserById(inputs.userId, false);
         if (!user) {
             throw new Error('User not found');
         }
@@ -89,12 +91,10 @@ const deleteUserTool = {
     inputSchema: z.object({
         userId: z.number().int()
     }),
-    outputSchema: z.object({
-        success: z.boolean()
-    }),
+    outputSchema: z.object({}),
     fn: async (inputs) => {
         await userService.deleteUserById(inputs.userId);
-        return { success: true };
+        return {};
     }
 };
 export const userTools = [createUserTool, getUsersTool, getUserTool, updateUserTool, deleteUserTool];

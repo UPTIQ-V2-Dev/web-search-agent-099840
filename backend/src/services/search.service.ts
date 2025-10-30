@@ -237,7 +237,13 @@ const getUserSearchHistory = async (
         toDate?: string;
     } = {}
 ): Promise<{
-    items: SearchHistory[];
+    items: Array<{
+        id: string;
+        query: string;
+        filters: any;
+        searchedAt: string;
+        resultCount: number;
+    }>;
     totalCount: number;
     currentPage: number;
     totalPages: number;
@@ -279,9 +285,12 @@ const getUserSearchHistory = async (
 
     return {
         items: items.map(item => ({
-            ...item,
-            filters: item.filters ? JSON.parse(item.filters) : null
-        })) as SearchHistory[],
+            id: item.id,
+            query: item.query,
+            filters: item.filters ? JSON.parse(item.filters) : null,
+            searchedAt: item.createdAt.toISOString(),
+            resultCount: item.resultCount
+        })),
         totalCount,
         currentPage: page,
         totalPages: Math.ceil(totalCount / limit),

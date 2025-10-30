@@ -174,17 +174,7 @@ exports.Prisma.NullsOrder = {
   first: 'first',
   last: 'last'
 };
-exports.Role = exports.$Enums.Role = {
-  USER: 'USER',
-  ADMIN: 'ADMIN'
-};
 
-exports.TokenType = exports.$Enums.TokenType = {
-  ACCESS: 'ACCESS',
-  REFRESH: 'REFRESH',
-  RESET_PASSWORD: 'RESET_PASSWORD',
-  VERIFY_EMAIL: 'VERIFY_EMAIL'
-};
 
 exports.Prisma.ModelName = {
   User: 'User',

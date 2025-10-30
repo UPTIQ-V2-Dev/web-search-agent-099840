@@ -23,9 +23,8 @@ const searchHistoryItemSchema = z.object({
     id: z.string(),
     query: z.string(),
     filters: z.any().nullable(),
-    resultCount: z.number(),
-    searchTime: z.number(),
-    createdAt: z.string()
+    searchedAt: z.string(),
+    resultCount: z.number()
 });
 
 const performWebSearchTool: MCPTool = {

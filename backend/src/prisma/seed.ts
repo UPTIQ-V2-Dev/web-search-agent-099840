@@ -1,4 +1,4 @@
-import { PrismaClient, Role } from '../generated/prisma/index.js';
+import { PrismaClient } from '../generated/prisma/index.js';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -15,7 +15,7 @@ async function main() {
             email: 'admin@example.com',
             name: 'Admin',
             password: adminPassword,
-            role: Role.ADMIN,
+            role: 'ADMIN',
             isEmailVerified: true
         }
     });
@@ -31,7 +31,7 @@ async function main() {
             email: 'user@example.com',
             name: 'Test User',
             password: userPassword,
-            role: Role.USER,
+            role: 'USER',
             isEmailVerified: true
         }
     });
